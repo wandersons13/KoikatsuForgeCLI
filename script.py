@@ -50,6 +50,12 @@ def check_dependency(path):
 
 
 def detect_gpu():
+    """
+    Checks for the presence of an NVIDIA GPU by testing the nvidia-smi command.
+
+    Returns:
+        bool: True if nvidia-smi executes successfully, False otherwise.
+    """
     try:
         r = subprocess.run(["nvidia-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return r.returncode == 0
@@ -58,6 +64,12 @@ def detect_gpu():
 
 
 def get_gpu_name():
+    """
+    Retrieves the hardware name of the detected NVIDIA GPU.
+
+    Returns:
+        str: The GPU name, or "Unknown" if extraction fails.
+    """
     try:
         r = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
@@ -76,6 +88,17 @@ def progress_bar(progress):
 
 
 def find_files(exts):
+    """
+    Recursively scans the INPUT_ROOT directory for files matching the given extensions.
+
+    Args:
+        exts (tuple): A tuple of strings representing file extensions (e.g., ('.png', '.jpg')).
+
+    Returns:
+        tuple: A tuple containing two lists:
+            - found (list): Absolute paths of files matching the extensions.
+            - skipped (list): Absolute paths of files that did not match.
+    """
     found = []
     skipped = []
 
@@ -92,6 +115,16 @@ def find_files(exts):
 
 
 def get_fps(video):
+    """
+    Extracts the framerate of a given video file using ffprobe.
+
+    Args:
+        video (str): Path to the video file.
+
+    Returns:
+        str: The framerate as a string (evaluated as a float if stored as a fraction), 
+             or "30" as a fallback upon failure.
+    """
     try:
         r = subprocess.run([
             FFPROBE,
@@ -115,6 +148,15 @@ def get_fps(video):
 
 
 def get_height(file):
+    """
+    Extracts the vertical resolution (height) of an image or video file using ffprobe.
+
+    Args:
+        file (str): Path to the media file.
+
+    Returns:
+        int or None: The height in pixels, or None if extraction fails.
+    """
     try:
         r = subprocess.run([
             FFPROBE,
@@ -154,7 +196,16 @@ def ui_progress(mode, file, done, total, start_time):
 
 
 def upscale_image(src, dst, fmt, gpu, target_height):
+    """
+    Upscales a single image using Real-ESRGAN and applies post-processing via FFmpeg.
 
+    Args:
+        src (str): Path to the source image.
+        dst (str): Path for the destination image.
+        fmt (str): Output format extension.
+        gpu (bool): Flag indicating whether to use hardware GPU acceleration.
+        target_height (int): The desired output height. If 0, keeps the raw 2x upscale height.
+    """
     try:
 
         tmp = dst + "_tmp.png"
@@ -182,38 +233,38 @@ def upscale_image(src, dst, fmt, gpu, target_height):
                 "-loglevel", "panic",
                 "-y",
                 "-i", tmp,
-                "-vf", f"scale=-2:{target_height}",
+                "-vf", f"scale=-2:{target_height},eq=gamma=0.8:contrast=1.1:saturation=1.05",
                 dst
             ])
 
-            os.remove(tmp)
-
         else:
 
-            if fmt == "png":
-                os.replace(tmp, dst)
+            subprocess.run([
+                FFMPEG,
+                "-loglevel", "panic",
+                "-y",
+                "-i", tmp,
+                "-vf", "eq=gamma=0.8:contrast=1.1:saturation=1.05",
+                dst
+            ])
 
-            else:
-
-                subprocess.run([
-                    FFMPEG,
-                    "-loglevel", "panic",
-                    "-y",
-                    "-i", tmp,
-                    "-vf", "format=yuv420p",
-                    "-compression_level", "6",
-                    "-q:v", "3",
-                    dst
-                ])
-
-                os.remove(tmp)
+        os.remove(tmp)
 
     except Exception as e:
         log_error(f"IMAGE ERROR: {src} -> {e}")
 
 
 def process_images(files, fmt, gpu, target_height, start_time):
+    """
+    Orchestrates the batch upscaling of image files.
 
+    Args:
+        files (list): A list of absolute paths to the source images.
+        fmt (str): Requested output format.
+        gpu (bool): Flag for hardware acceleration.
+        target_height (int): Requested output resolution height.
+        start_time (float): The UNIX timestamp when the job started.
+    """
     total = len(files)
 
     for i, src in enumerate(files, 1):
@@ -233,7 +284,17 @@ def process_images(files, fmt, gpu, target_height, start_time):
 
 
 def upscale_video(src, dst, fmt, gpu, target_height):
+    """
+    Upscales a single video by extracting frames, processing them sequentially with 
+    Real-ESRGAN, and recompiling the video with the original audio and post-processing.
 
+    Args:
+        src (str): Path to the source video.
+        dst (str): Path for the destination video.
+        fmt (str): Output format extension ('mp4' or 'webm').
+        gpu (bool): Flag indicating whether to use hardware GPU acceleration.
+        target_height (int): The desired output height. If 0, keeps the raw 2x upscale height.
+    """
     tmp_in = f"tmp_in_{os.getpid()}"
     tmp_out = f"tmp_out_{os.getpid()}"
 
@@ -267,10 +328,10 @@ def upscale_video(src, dst, fmt, gpu, target_height):
             "-m", MODEL_DIR
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        scale_filter = "eq=gamma=0.8,format=yuv420p"
+        scale_filter = "eq=gamma=0.8:contrast=1.1:saturation=1.05,format=yuv420p"
 
         if target_height > 0 and ai_height and target_height < ai_height:
-            scale_filter = f"scale=-2:{target_height},eq=gamma=0.8,format=yuv420p"
+            scale_filter = f"scale=-2:{target_height},eq=gamma=0.8:contrast=1.1:saturation=1.05,format=yuv420p"
 
         if fmt == "mp4":
 
@@ -288,7 +349,6 @@ def upscale_video(src, dst, fmt, gpu, target_height):
                 "-c:a", "copy",
                 "-c:v", codec,
                 "-preset", "p4",
-                "-cq", "23",
                 "-vf", scale_filter,
                 dst
             ])
@@ -305,9 +365,7 @@ def upscale_video(src, dst, fmt, gpu, target_height):
                 "-map", "0:v:0",
                 "-map", "1:a:0?",
                 "-c:a", "libopus",
-                "-b:a", "96k",
                 "-c:v", "libvpx-vp9",
-                "-crf", "32",
                 "-b:v", "0",
                 "-vf", scale_filter,
                 dst
@@ -323,7 +381,16 @@ def upscale_video(src, dst, fmt, gpu, target_height):
 
 
 def process_videos(files, fmt, gpu, target_height, start_time):
+    """
+    Orchestrates the batch upscaling of video files.
 
+    Args:
+        files (list): A list of absolute paths to the source videos.
+        fmt (str): Requested output format.
+        gpu (bool): Flag for hardware acceleration.
+        target_height (int): Requested output resolution height.
+        start_time (float): The UNIX timestamp when the job started.
+    """
     total = len(files)
 
     for i, src in enumerate(files, 1):
@@ -363,7 +430,10 @@ def page(title, options):
 
 
 def check_environment():
-
+    """
+    Validates that all required third-party binaries (Real-ESRGAN, FFmpeg, FFprobe) 
+    are present in the expected directories before execution. Exits the program if any are missing.
+    """
     missing = []
 
     if not check_dependency(REALESRGAN_EXE):
@@ -395,7 +465,21 @@ def check_environment():
 
 
 def show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_fmt):
+    """
+    Displays a pre-flight execution summary for the user to confirm before processing begins.
 
+    Args:
+        images (list): Discovered image files.
+        videos (list): Discovered video files.
+        skipped (list): Files that were skipped due to unsupported extensions.
+        gpu (bool): Hardware acceleration availability flag.
+        target_height (int): The chosen output resolution height.
+        image_fmt (str): Output format for images.
+        video_fmt (str): Output format for videos.
+
+    Returns:
+        bool: True if the user confirms to start processing, False to abort.
+    """
     clear()
     header()
 
@@ -445,7 +529,10 @@ def show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_f
 
 
 def main():
-
+    """
+    Primary entry point for the CLI. Handles initial environment checks, directory 
+    creation, user input mapping, file scanning, and triggers the processing pipelines.
+    """
     check_environment()
 
     os.makedirs(INPUT_ROOT, exist_ok=True)

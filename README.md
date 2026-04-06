@@ -9,7 +9,7 @@
 ## ✨ Key Features
 
 - **Intelligent Batch Processing:** The script performs recursive folder scanning, allowing you to process hundreds of files across nested directories while preserving your original folder hierarchy in the output.
-- **Anime-Optimized Engine:** Uses the `realesr-animevideov3` model, which is specifically designed to enhance stylized lines and colors common in Koikatsu media.
+- **Anime-Optimized Engine:** Uses the `realesr-animevideov3` model (via ncnn-vulkan), which is specifically designed to enhance stylized lines and colors common in Koikatsu media.
 - **Smart Hardware Management:** The pipeline automatically detects NVIDIA GPUs via `nvidia-smi` to enable hardware acceleration. If no compatible GPU is found, it safely falls back to CPU-only processing.
 - **Custom Resolution Targets:** Unlike standard upscalers, this tool allows you to choose a target output height (720p, 1080p, 1440p, or 4K). It upscales the media by 2x and then intelligently downscales it to your precise requirements using FFmpeg.
 - **Resilient Execution:** Built to handle "dirty" data; if a file is corrupted or fails to process, the script logs the specific error to `error_log.txt` and continues to the next file without stopping the entire queue.
@@ -43,11 +43,12 @@ KoikatsuForgeCLI/
 ### 2. Basic Usage
 
 1. **Prepare Media:** Place your images or videos into the `input/` folder.
-2. **Launch:** Double-click **`KoikatsuForgeCLI.bat`** to start the environment.
+2. **Launch:** Double-click **`KoikatsuForgeCLI.bat`** to start the environment (or run `python script.py`).
 3. **Configure:** Follow the interactive menu to:
    - Select the media type (Images, Videos, or Both).
    - Choose your preferred output format (e.g., WebP for images or MP4 for videos).
    - Set your target resolution (from raw 2x up to 4K).
+
 4. **Confirm:** Review the scan summary (total files found, GPU status) and press **1** to begin.
 
 ---
@@ -63,11 +64,11 @@ KoikatsuForgeCLI/
 
 ## ⚙️ Technical Specifications
 
-- **Video Processing Workflow:** The script extracts frames into a temporary directory, upscales them individually, and then re-assembles them with the original audio using FFmpeg.
-- **Visual Enhancements:** A `gamma=0.8` correction filter is applied during video encoding to counteract the slight "washing out" that can occur during AI upscaling, ensuring vibrant results.
-- **Encoding Efficiency:** \* **MP4:** Uses `hevc_nvenc` for NVIDIA-accelerated H.265 encoding or `libx265` for high-quality CPU encoding.
-  - **WEBM:** Uses `libvpx-vp9` with a variable bitrate (CRF 32) and Opus audio for maximum web compatibility.
-- **Auto-Cleanup:** All temporary frame sequences and intermediate folders are automatically deleted upon completion to save disk space.
+- **Robust Video Workflow:** The script handles complex video files by accurately calculating fractional framerates using FFprobe. It extracts frames into process-safe temporary directories (using OS PIDs) to prevent conflicts if multiple instances are run.
+- **Advanced Visual Enhancements:** AI upscaling can sometimes wash out colors. To counteract this, the pipeline applies a post-processing color correction filter (`gamma=0.8, contrast=1.1, saturation=1.05`) via FFmpeg to **both images and videos**, ensuring vibrant and punchy results.
+- **Encoding Efficiency:** - **MP4:** Uses `hevc_nvenc` with the `p4` preset for fast, high-quality NVIDIA-accelerated H.265 encoding, or `libx265` for CPU encoding.
+  - **WEBM:** Uses `libvpx-vp9` with variable bitrate (`-b:v 0`) and `libopus` audio for maximum web compatibility and quality retention.
+- **Auto-Cleanup:** All temporary frame sequences (`tmp_in`, `tmp_out`) and intermediate image files are strictly managed and automatically deleted upon completion or failure to save disk space.
 
 ---
 
