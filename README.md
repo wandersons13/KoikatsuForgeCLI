@@ -1,4 +1,4 @@
-# 🔨 KoikatsuForge CLI
+# 🔨 KoikatsuForge CLI `v0.3-public`
 
 > **An advanced AI upscaling pipeline specifically tuned for Koikatsu media.**
 >
@@ -9,9 +9,13 @@
 ## ✨ Key Features
 
 - **Intelligent Batch Processing:** The script performs recursive folder scanning, allowing you to process hundreds of files across nested directories while preserving your original folder hierarchy in the output.
+- **Automated Ren'Py Archive (.rpa) Generation:** The tool can automatically compile your processed assets into production-ready `.rpa` archives, dynamically organizing them by top-level folders for effortless game integration.
 - **Anime-Optimized Engine:** Uses the `realesr-animevideov3` model (via ncnn-vulkan), which is specifically designed to enhance stylized lines and colors common in Koikatsu media.
 - **Smart Hardware Management:** The pipeline automatically detects NVIDIA GPUs via `nvidia-smi` to enable hardware acceleration. If no compatible GPU is found, it safely falls back to CPU-only processing.
 - **Custom Resolution Targets:** Unlike standard upscalers, this tool allows you to choose a target output height (720p, 1080p, 1440p, or 4K). It upscales the media by 2x and then intelligently downscales it to your precise requirements using FFmpeg.
+- **Optimized WebP/WebM Compression:** - Images: Uses `libwebp` with a balanced Quality/Effort ratio (Q90/M4), achieving up to 88% size reduction compared to raw PNG with no perceptible quality loss.
+  - Videos: Uses `libvpx-vp9` in Constant Quality mode (`-crf 30`) with `-speed 2` and `-tile-columns` to ensure stable encoding times and modern file sizes.
+- **Dynamic RPA Fallback:** Automatically detects loose files in the output root and bundles them into `root_files.rpa` to ensure no asset is left behind.
 - **Resilient Execution:** Built to handle "dirty" data; if a file is corrupted or fails to process, the script logs the specific error to `error_log.txt` and continues to the next file without stopping the entire queue.
 - **Real-time Progress Tracking:** The interactive CLI provides a visual progress bar, elapsed time, and a dynamic "Remaining Time" estimate based on your hardware's current performance.
 
@@ -27,6 +31,7 @@ For the script to function correctly, your directory must maintain the following
 KoikatsuForgeCLI/
 ├── KoikatsuForgeCLI.bat        # Recommended entry point
 ├── script.py                   # Main processing logic
+├── rpatool.py                  # Archive generation tool
 ├── bin/                        # Video processing tools
 │   ├── ffmpeg.exe
 │   └── ffprobe.exe

@@ -17,6 +17,7 @@ MODEL_DIR = os.path.join(BASE_DIR, "models")
 BAR_SIZE = 30
 LINE = "-" * 85
 
+
 HEADER = r"""
   _  __     _ _         _             ______                      _____ _      _____ 
  | |/ /    (_) |       | |           |  ____|                    / ____| |    |_   _|
@@ -25,7 +26,7 @@ HEADER = r"""
  | . \ (_) | |   < (_| | |_\__ \ |_| | | | (_) | | | (_| |  __/ | |____| |____ _| |_ 
  |_|\_\___/|_|_|\_\__,_|\__|___/\__,_|_|  \___/|_|  \__, |\___|  \_____|______|_____|
                                                      __/ |                           
-   ┬┴┬┴┤ AI Upscaling Pipeline ├┬┴┬┴                |___/                            
+        AI Upscaling Pipeline - v0.3-public         |___/                            
 """
 
 ERROR_LOG = "error_log.txt"
@@ -226,6 +227,10 @@ def upscale_image(src, dst, fmt, gpu, target_height):
         height = get_height(src)
         ai_height = height * 2 if height else None
 
+        webp_params = []
+        if fmt.lower() == "webp":
+            webp_params = ["-c:v", "libwebp", "-q:v", "90", "-compression_level", "4"]
+
         if target_height > 0 and ai_height and target_height < ai_height:
 
             subprocess.run([
@@ -234,6 +239,7 @@ def upscale_image(src, dst, fmt, gpu, target_height):
                 "-y",
                 "-i", tmp,
                 "-vf", f"scale=-2:{target_height},eq=gamma=0.8:contrast=1.1:saturation=1.05",
+                *webp_params,
                 dst
             ])
 
@@ -245,6 +251,7 @@ def upscale_image(src, dst, fmt, gpu, target_height):
                 "-y",
                 "-i", tmp,
                 "-vf", "eq=gamma=0.8:contrast=1.1:saturation=1.05",
+                *webp_params,
                 dst
             ])
 
@@ -366,7 +373,10 @@ def upscale_video(src, dst, fmt, gpu, target_height):
                 "-map", "1:a:0?",
                 "-c:a", "libopus",
                 "-c:v", "libvpx-vp9",
+                "-crf", "30",
                 "-b:v", "0",
+                "-speed", "2",
+                "-tile-columns", "2",
                 "-vf", scale_filter,
                 dst
             ])
@@ -464,7 +474,7 @@ def check_environment():
         sys.exit()
 
 
-def show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_fmt):
+def show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_fmt, create_rpa):
     """
     Displays a pre-flight execution summary for the user to confirm before processing begins.
 
@@ -476,6 +486,7 @@ def show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_f
         target_height (int): The chosen output resolution height.
         image_fmt (str): Output format for images.
         video_fmt (str): Output format for videos.
+        create_rpa (bool): Flag indicating if folder-based RPA archives will be generated.
 
     Returns:
         bool: True if the user confirms to start processing, False to abort.
@@ -512,6 +523,12 @@ def show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_f
 
     print("Images :", image_fmt.upper())
     print("Videos :", video_fmt.upper())
+
+    print("")
+    if create_rpa:
+        print("Create RPA   : Yes")
+    else:
+        print("Create RPA   : No")
 
     print(LINE)
     print("1) Start")
@@ -600,6 +617,19 @@ def main():
 
     target_height = res_map.get(c, 0)
 
+    create_rpa = False
+
+    rpa_choice = page(
+        "Create Ren'Py Archives (.rpa) after processing?",
+        {
+            "1": "Yes",
+            "2": "No"
+        }
+    )
+
+    if rpa_choice == "1":
+        create_rpa = True
+
     img_ext = (".png", ".jpg", ".jpeg", ".webp")
     vid_ext = (".mp4", ".webm", ".mkv", ".mov")
 
@@ -631,7 +661,7 @@ def main():
 
         return
 
-    if not show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_fmt):
+    if not show_summary(images, videos, skipped, gpu, target_height, image_fmt, video_fmt, create_rpa):
         return
 
     start_time = time.time()
@@ -641,6 +671,73 @@ def main():
 
     if videos:
         process_videos(videos, video_fmt, gpu, target_height, start_time)
+
+    created_archives = []
+
+    if create_rpa:
+        """
+        RPA Generation Logic:
+        This block dynamically scans the completed OUTPUT_ROOT. It identifies all top-level 
+        directories (e.g., 'images', 'videos'). For each top-level directory, it spawns a 
+        subprocess calling rpatool.py to build an archive named after the folder (e.g., 'images.rpa').
+        Subdirectories and their contents are mapped relative to the OUTPUT_ROOT, effectively
+        bundling them naturally into their parent's archive.
+        Any 'loose' files located directly in the root of OUTPUT_ROOT are bundled into a 
+        catch-all 'root_files.rpa' archive.
+        """
+        clear()
+        header()
+        print("Creating Ren'Py Archives...")
+        print(LINE)
+
+        rpatool_path = os.path.join(BASE_DIR, "rpatool.py")
+
+        top_dirs = [d for d in os.listdir(OUTPUT_ROOT) if os.path.isdir(os.path.join(OUTPUT_ROOT, d))]
+        loose_files = [f for f in os.listdir(OUTPUT_ROOT) if os.path.isfile(os.path.join(OUTPUT_ROOT, f)) and not f.endswith(".rpa")]
+
+        for d in top_dirs:
+            rpa_name = f"{d}.rpa"
+            print(f" -> Packing {rpa_name}...")
+
+            try:
+                rpa_args = [sys.executable, rpatool_path, "-c", os.path.join(OUTPUT_ROOT, rpa_name)]
+                dir_path = os.path.join(OUTPUT_ROOT, d)
+
+                for root_dir, _, files in os.walk(dir_path):
+                    for f in files:
+                        full_path = os.path.join(root_dir, f)
+                        rel_path = os.path.relpath(full_path, OUTPUT_ROOT)
+                        rel_path_unix = rel_path.replace(os.sep, '/')
+                        rpa_args.append(f"{rel_path_unix}={full_path}")
+
+                subprocess.run(rpa_args, check=True)
+                created_archives.append(rpa_name)
+                shutil.rmtree(dir_path)
+            except Exception as e:
+                log_error(f"RPA ERROR ({rpa_name}): {e}")
+                print(f"    [!] Failed to create {rpa_name}: {e}")
+
+        if loose_files:
+            rpa_name = "root_files.rpa"
+            print(f" -> Packing {rpa_name} (loose files)...")
+            try:
+                rpa_args = [sys.executable, rpatool_path, "-c", os.path.join(OUTPUT_ROOT, rpa_name)]
+
+                for f in loose_files:
+                    full_path = os.path.join(OUTPUT_ROOT, f)
+                    rel_path_unix = f.replace(os.sep, '/')
+                    rpa_args.append(f"{rel_path_unix}={full_path}")
+
+                subprocess.run(rpa_args, check=True)
+                created_archives.append(rpa_name)
+
+                for f in loose_files:
+                    os.remove(os.path.join(OUTPUT_ROOT, f))
+            except Exception as e:
+                log_error(f"RPA ERROR ({rpa_name}): {e}")
+                print(f"    [!] Failed to create {rpa_name}: {e}")
+
+        time.sleep(2)
 
     clear()
     header()
@@ -661,6 +758,12 @@ def main():
     print("Total time       :", time.strftime("%H:%M:%S", time.gmtime(total_time)))
     print("")
     print("Output folder    :", OUTPUT_ROOT)
+
+    if create_rpa:
+        if created_archives:
+            print("Archives created :", ", ".join(created_archives))
+        else:
+            print("Archives created : None (Check errors)")
 
     print(LINE)
 
